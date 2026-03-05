@@ -312,39 +312,66 @@ function applyMapping() {
 }
 
 // ── CAMERA ────────────────────────────────
+let scanInterval = null;
+const SCAN_SIZE = 480; // résolution réduite pour jsQR — plus fiable sur Android
+
 async function startCamera() {
   try {
     if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'environment', width:{ideal:1280} } });
+    if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+
     const video = document.getElementById('video');
     video.srcObject = stream;
+    video.setAttribute('playsinline', true);
     await video.play();
+
     scanning = true;
-    requestAnimationFrame(scanFrame);
+    // setInterval plus fiable que requestAnimationFrame sur Android Chrome
+    scanInterval = setInterval(scanFrame, 250); // 4 tentatives/sec
     showToast('Caméra activée ✓');
     showTab('scan');
-  } catch(e) { showToast('Impossible d\'accéder à la caméra'); }
+  } catch(e) {
+    console.error(e);
+    showToast('Erreur caméra : ' + e.message);
+  }
 }
 
 function stopCamera() {
   scanning = false;
+  if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   showToast('Caméra arrêtée');
 }
 
 function scanFrame() {
-  if (!scanning) return;
+  if (!scanning || scanCooldown) return;
   const video = document.getElementById('video');
+  if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
   const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
-    if (code && !scanCooldown) handleScan(code.data.trim());
-  }
-  requestAnimationFrame(scanFrame);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  // Redimensionner à SCAN_SIZE pour alléger jsQR
+  const ratio = video.videoWidth / video.videoHeight;
+  canvas.width  = SCAN_SIZE;
+  canvas.height = Math.round(SCAN_SIZE / ratio);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Essayer les deux modes d'inversion pour maximiser les chances de lecture
+  let code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+  if (!code) code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'invertFirst' });
+
+  if (code && code.data) handleScan(code.data.trim());
 }
 
 // ── SCAN LOGIC ────────────────────────────
