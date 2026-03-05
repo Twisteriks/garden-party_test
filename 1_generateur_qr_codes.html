@@ -80,8 +80,8 @@
     📋 <strong>Format attendu du fichier Excel</strong> — première ligne = en-têtes :
     <table>
       <tr><th>ID</th><th>Prénom</th><th>Nom</th><th>Accompagnants</th><th>Email</th></tr>
-      <tr><td>INV-0001</td><td>Marie</td><td>Dupont</td><td>1</td><td>marie@exemple.fr</td></tr>
-      <tr><td>INV-0002</td><td>Jean</td><td>Martin</td><td>0</td><td>jean@exemple.fr</td></tr>
+      <tr><td>INV-0001</td><td>Marie</td><td>Dupont</td><td>1</td><td><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="167b77647f7356736e737b667a73387064">[email&#160;protected]</a></td></tr>
+      <tr><td>INV-0002</td><td>Jean</td><td>Martin</td><td>0</td><td><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="bdd7d8dcd3fdd8c5d8d0cdd1d893dbcf">[email&#160;protected]</a></td></tr>
     </table>
     <br>→ <strong>Accompagnants</strong> = nombre de personnes supplémentaires (mettre <strong>0</strong> si l'invité vient seul).
   </div>
@@ -101,7 +101,7 @@
   <div id="qr-grid"><div class="empty-state">Importez votre liste pour générer les QR codes</div></div>
 </div>
 
-<script>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 let guests = [];
 
 // Drag & drop
@@ -172,10 +172,7 @@ function generateQRCodes() {
       card.appendChild(badge);
     }
 
-    const idEl = document.createElement('div');
-    idEl.className = 'qr-id';
-    idEl.textContent = `ID : ${g.id}`;
-    card.appendChild(idEl);
+
 
     grid.appendChild(card);
   });
@@ -189,14 +186,4 @@ function exportExcel() {
   const data = guests.map(g => ({
     ID: g.id, Prénom: g.prenom, Nom: g.nom,
     Accompagnants: g.accomp, 'Total personnes': 1 + g.accomp,
-    Email: g.email, Présent: '', 'Accompagnants présents': '', 'Heure arrivée': '', Notes: ''
-  }));
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-  ws['!cols'] = [{wch:14},{wch:16},{wch:18},{wch:15},{wch:16},{wch:26},{wch:10},{wch:22},{wch:16},{wch:22}];
-  XLSX.utils.book_append_sheet(wb, ws, 'Invités');
-  XLSX.writeFile(wb, 'liste_invites_reference.xlsx');
-}
-</script>
-</body>
-</html>
+    Email: g.email, Présent: '', 'Accompagnants présents': '', 'Heure arrivée': 

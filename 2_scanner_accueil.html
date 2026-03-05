@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Scan Invités — Garden Party</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500&display=swap');
   :root { --gold: #C9A84C; --dark: #111; --cream: #faf8f3; --green: #2d7a4f; --red: #c0392b; --border: #2a2a2a; }
@@ -313,19 +312,31 @@ function applyMapping() {
 
 // ── CAMERA ────────────────────────────────
 let scanInterval = null;
-const SCAN_SIZE = 480; // résolution réduite pour jsQR — plus fiable sur Android
+let barcodeDetector = null;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
 
 async function startCamera() {
   try {
     if (stream) stream.getTracks().forEach(t => t.stop());
     if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
 
+    // BarcodeDetector = API native Android Chrome 83+, bien plus fiable
+    if ('BarcodeDetector' in window) {
+      barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    } else {
+      barcodeDetector = null;
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js');
+    }
+
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width:  { ideal: 1280 },
-        height: { ideal: 720 }
-      }
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
     });
 
     const video = document.getElementById('video');
@@ -334,13 +345,12 @@ async function startCamera() {
     await video.play();
 
     scanning = true;
-    // setInterval plus fiable que requestAnimationFrame sur Android Chrome
-    scanInterval = setInterval(scanFrame, 250); // 4 tentatives/sec
-    showToast('Caméra activée ✓');
+    scanInterval = setInterval(scanFrame, 300);
+    showToast(barcodeDetector ? 'Caméra activée ✓' : 'Caméra activée (compat.) ✓');
     showTab('scan');
   } catch(e) {
     console.error(e);
-    showToast('Erreur caméra : ' + e.message);
+    showToast('Erreur : ' + e.message);
   }
 }
 
@@ -351,27 +361,26 @@ function stopCamera() {
   showToast('Caméra arrêtée');
 }
 
-function scanFrame() {
+async function scanFrame() {
   if (!scanning || scanCooldown) return;
   const video = document.getElementById('video');
-  if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
-
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  // Redimensionner à SCAN_SIZE pour alléger jsQR
-  const ratio = video.videoWidth / video.videoHeight;
-  canvas.width  = SCAN_SIZE;
-  canvas.height = Math.round(SCAN_SIZE / ratio);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Essayer les deux modes d'inversion pour maximiser les chances de lecture
-  let code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-  if (!code) code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'invertFirst' });
-
-  if (code && code.data) handleScan(code.data.trim());
+  if (!video.srcObject || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+  try {
+    if (barcodeDetector) {
+      // API native — délègue au moteur QR du téléphone
+      const codes = await barcodeDetector.detect(video);
+      if (codes.length > 0) handleScan(codes[0].rawValue.trim());
+    } else if (typeof jsQR !== 'undefined') {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      canvas.width = 480;
+      canvas.height = Math.round(480 / (video.videoWidth / video.videoHeight));
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+      if (code && code.data) handleScan(code.data.trim());
+    }
+  } catch(e) { /* scan silencieux */ }
 }
 
 // ── SCAN LOGIC ────────────────────────────
