@@ -158,6 +158,22 @@
   </div>
   <div class="scan-hint">Pointez la caméra vers le QR code de l'invitation</div>
 
+  <!-- DEBUG PANEL -->
+  <div id="debug-panel" style="margin:0 0.8rem;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:4px;padding:0.8rem;font-family:monospace;font-size:0.72rem;color:#888;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+      <span style="color:var(--gold);letter-spacing:0.1em;font-family:'Jost',sans-serif;font-size:0.68rem">DIAGNOSTIC</span>
+      <button onclick="document.getElementById('debug-panel').style.display='none'" style="background:none;border:none;color:#555;cursor:pointer;font-size:0.8rem">✕</button>
+    </div>
+    <div id="dbg-api">API : —</div>
+    <div id="dbg-video">Vidéo : —</div>
+    <div id="dbg-frames">Frames analysées : 0</div>
+    <div id="dbg-last">Dernier scan : —</div>
+    <div id="dbg-error" style="color:#c0392b"></div>
+  </div>
+  <div style="text-align:center;padding:0.3rem">
+    <button onclick="toggleDebug()" style="background:none;border:none;color:#333;font-size:0.68rem;font-family:'Jost',sans-serif;letter-spacing:0.1em;cursor:pointer">⚙ debug</button>
+  </div>
+
   <div id="result-card">
     <div class="res-top">
       <div class="res-icon" id="res-icon">✓</div>
@@ -313,6 +329,16 @@ function applyMapping() {
 // ── CAMERA ────────────────────────────────
 let scanInterval = null;
 let barcodeDetector = null;
+let frameCount = 0;
+
+function toggleDebug() {
+  const p = document.getElementById('debug-panel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+function dbg(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -326,12 +352,14 @@ async function startCamera() {
   try {
     if (stream) stream.getTracks().forEach(t => t.stop());
     if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+    frameCount = 0;
 
-    // BarcodeDetector = API native Android Chrome 83+, bien plus fiable
     if ('BarcodeDetector' in window) {
       barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+      dbg('dbg-api', 'API : BarcodeDetector natif ✓');
     } else {
       barcodeDetector = null;
+      dbg('dbg-api', 'API : jsQR (fallback)');
       await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js');
     }
 
@@ -344,12 +372,15 @@ async function startCamera() {
     video.setAttribute('playsinline', true);
     await video.play();
 
+    dbg('dbg-video', `Vidéo : ${video.videoWidth}×${video.videoHeight} readyState=${video.readyState}`);
+
     scanning = true;
     scanInterval = setInterval(scanFrame, 300);
     showToast(barcodeDetector ? 'Caméra activée ✓' : 'Caméra activée (compat.) ✓');
     showTab('scan');
   } catch(e) {
     console.error(e);
+    dbg('dbg-error', 'ERREUR: ' + e.name + ' — ' + e.message);
     showToast('Erreur : ' + e.message);
   }
 }
@@ -364,12 +395,21 @@ function stopCamera() {
 async function scanFrame() {
   if (!scanning || scanCooldown) return;
   const video = document.getElementById('video');
-  if (!video.srcObject || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+  if (!video.srcObject || video.readyState !== video.HAVE_ENOUGH_DATA) {
+    dbg('dbg-video', `Vidéo : readyState=${video.readyState} (attend HAVE_ENOUGH_DATA=4)`);
+    return;
+  }
+  frameCount++;
+  if (frameCount % 5 === 0) {
+    dbg('dbg-frames', `Frames analysées : ${frameCount} | ${video.videoWidth}×${video.videoHeight}`);
+  }
   try {
     if (barcodeDetector) {
-      // API native — délègue au moteur QR du téléphone
       const codes = await barcodeDetector.detect(video);
-      if (codes.length > 0) handleScan(codes[0].rawValue.trim());
+      if (codes.length > 0) {
+        dbg('dbg-last', 'Détecté : ' + codes[0].rawValue);
+        handleScan(codes[0].rawValue.trim());
+      }
     } else if (typeof jsQR !== 'undefined') {
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -378,9 +418,16 @@ async function scanFrame() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
-      if (code && code.data) handleScan(code.data.trim());
+      if (code && code.data) {
+        dbg('dbg-last', 'Détecté : ' + code.data);
+        handleScan(code.data.trim());
+      }
+    } else {
+      dbg('dbg-error', 'Aucune API de scan disponible !');
     }
-  } catch(e) { /* scan silencieux */ }
+  } catch(e) {
+    dbg('dbg-error', 'Erreur scan: ' + e.message);
+  }
 }
 
 // ── SCAN LOGIC ────────────────────────────
